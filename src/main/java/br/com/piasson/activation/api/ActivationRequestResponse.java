@@ -1,0 +1,29 @@
+package br.com.piasson.activation.api;
+
+import br.com.piasson.activation.domain.ActivationRequest;
+import br.com.piasson.activation.domain.ActivationStatus;
+
+import java.time.Instant;
+import java.util.UUID;
+
+/** Representação pública da solicitação; desacopla a API da entidade JPA. */
+public record ActivationRequestResponse(
+        UUID id,
+        String externalId,
+        String customerId,
+        String productCode,
+        ActivationStatus status,
+        Instant createdAt,
+        Instant updatedAt) {
+
+    public static ActivationRequestResponse from(ActivationRequest request) {
+        return new ActivationRequestResponse(
+                request.getId(),
+                request.getExternalId(),
+                request.getCustomerId(),
+                request.getProductCode(),
+                request.getStatus(),
+                request.getCreatedAt(),
+                request.getUpdatedAt());
+    }
+}

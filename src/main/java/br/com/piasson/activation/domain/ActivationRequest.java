@@ -10,6 +10,7 @@ import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -61,7 +62,7 @@ public class ActivationRequest {
         this.customerId = Objects.requireNonNull(customerId, "customerId");
         this.productCode = Objects.requireNonNull(productCode, "productCode");
         this.status = ActivationStatus.PENDING;
-        Instant now = Instant.now();
+        Instant now = now();
         this.createdAt = now;
         this.updatedAt = now;
     }
@@ -87,7 +88,7 @@ public class ActivationRequest {
             throw new InvalidStatusTransitionException(status, target);
         }
         this.status = target;
-        this.updatedAt = Instant.now();
+        this.updatedAt = now();
     }
 
     /** Mesmo externalId com os mesmos dados de negócio: caracteriza um retry legítimo. */
@@ -97,7 +98,12 @@ public class ActivationRequest {
 
     @PreUpdate
     void onUpdate() {
-        this.updatedAt = Instant.now();
+        this.updatedAt = now();
+    }
+
+    /** Milissegundos: precisão suficiente e idêntica antes e depois de persistir (o banco guarda micros). */
+    private static Instant now() {
+        return Instant.now().truncatedTo(ChronoUnit.MILLIS);
     }
 
     public UUID getId() {

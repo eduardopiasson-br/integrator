@@ -13,7 +13,39 @@ Requisitos: JDK 21. O Maven é baixado automaticamente pelo wrapper.
 
 Os testes de integração usam **Testcontainers** (PostgreSQL real), portanto é necessário Docker em execução.
 
+## API
+
+| Método | Caminho | Descrição | Respostas |
+|---|---|---|---|
+| `POST` | `/api/v1/requests` | Cria uma solicitação de ativação | `201 Created` + header `Location`; `400` dados inválidos |
+| `GET` | `/api/v1/requests/{id}` | Consulta uma solicitação e seu status | `200`; `404` inexistente; `400` id fora do formato UUID |
+
+```bash
+curl -i -X POST localhost:8080/api/v1/requests \
+  -H 'Content-Type: application/json' \
+  -d '{"externalId":"EXT-12345","customerId":"CUST-10001","productCode":"INTERNET-500"}'
+```
+
+### Regras de validação
+
+| Campo | Regra |
+|---|---|
+| `externalId`, `customerId`, `productCode` | obrigatórios, 1 a 64 caracteres, apenas `A-Z a-z 0-9 - _` (identificadores de outros sistemas: sem espaços ou acentos) |
+
+Datas sempre em UTC, ISO-8601 (`2026-10-26T14:03:11.123456Z`).
+
 ## Decisões técnicas
+
+### API
+
+- **DTOs separados da entidade** (`CreateActivationRequestRequest`, `ActivationRequestResponse`, ambos `record`):
+  a entidade JPA nunca é serializada, então mudanças internas (campos de controle, versão) não vazam
+  para o contrato e o cliente não consegue enviar campos que não deveria (ex.: `status`).
+- **Validação na borda** com Bean Validation; o service recebe um `CreateActivationRequestCommand` já válido.
+- **`201 Created` com `Location`** apontando para o recurso criado, conforme a semântica HTTP.
+- **Camadas**: `api` (HTTP) -> `application` (casos de uso, transação) -> `domain` (entidade, regras, repositório).
+  A dependência é sempre nessa direção.
+
 
 ### Domínio e persistência
 
