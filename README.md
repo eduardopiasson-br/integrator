@@ -32,7 +32,36 @@ curl -i -X POST localhost:8080/api/v1/requests \
 |---|---|
 | `externalId`, `customerId`, `productCode` | obrigatórios, 1 a 64 caracteres, apenas `A-Z a-z 0-9 - _` (identificadores de outros sistemas: sem espaços ou acentos) |
 
-Datas sempre em UTC, ISO-8601 (`2026-10-26T14:03:11.123456Z`).
+Datas sempre em UTC, ISO-8601 (`2026-10-26T14:03:11.123Z`).
+
+### Erros
+
+Toda resposta de erro segue **Problem Details (RFC 9457)**, `Content-Type: application/problem+json`,
+com um `traceId` que identifica a requisição nos logs. Nenhuma resposta expõe stack trace ou mensagens
+internas.
+
+```json
+{
+  "type": "urn:activation-service:problem:validation-error",
+  "title": "Dados inválidos",
+  "status": 400,
+  "detail": "Um ou mais campos não passaram na validação.",
+  "instance": "/api/v1/requests",
+  "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+  "errors": [ { "field": "customerId", "message": "não deve estar em branco" } ]
+}
+```
+
+| `type` (sufixo) | HTTP | Quando |
+|---|---|---|
+| `validation-error` | 400 | campos inválidos (`errors[]` lista campo e mensagem) |
+| `malformed-request` | 400 | JSON inválido ou parâmetro com tipo errado |
+| `not-found` | 404 | solicitação inexistente |
+| `internal-error` | 500 | erro inesperado; o detalhe completo fica no log, localizável pelo `traceId` |
+
+**Correlação**: o cliente pode enviar `X-Correlation-Id`; se não enviar (ou enviar um valor inseguro),
+o serviço gera um. O valor volta no header da resposta, é o `traceId` dos erros e aparece em todas as
+linhas de log da requisição (`[correlationId]`).
 
 ## Decisões técnicas
 
@@ -45,6 +74,11 @@ Datas sempre em UTC, ISO-8601 (`2026-10-26T14:03:11.123456Z`).
 - **`201 Created` com `Location`** apontando para o recurso criado, conforme a semântica HTTP.
 - **Camadas**: `api` (HTTP) -> `application` (casos de uso, transação) -> `domain` (entidade, regras, repositório).
   A dependência é sempre nessa direção.
+- **Tratamento de erros centralizado** em `ApiExceptionHandler`, que estende `ResponseEntityExceptionHandler`
+  para herdar o mapeamento padrão do Spring MVC (405, 415, rota inexistente...) e apenas personaliza o que
+  importa para a API. Exceções de domínio/aplicação não conhecem HTTP; o mapeamento para status fica na
+  camada `api`. Erros 5xx são logados com stack trace e `traceId`; 4xx não geram log de erro.
+- **Locale fixo (`pt_BR`)**: mensagens de validação não variam com o `Accept-Language` do cliente.
 
 
 ### Domínio e persistência
