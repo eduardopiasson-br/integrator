@@ -17,7 +17,7 @@ Os testes de integração usam **Testcontainers** (PostgreSQL real), portanto é
 
 | Método | Caminho | Descrição | Respostas |
 |---|---|---|---|
-| `POST` | `/api/v1/requests` | Cria uma solicitação de ativação | `201 Created` + header `Location`; `400` dados inválidos |
+| `POST` | `/api/v1/requests` | Cria uma solicitação de ativação | `201 Created` + header `Location`; `200` repetição idêntica (retorna o registro existente); `409` mesmo `externalId` com conteúdo diferente; `400` dados inválidos |
 | `GET` | `/api/v1/requests/{id}` | Consulta uma solicitação e seu status | `200`; `404` inexistente; `400` id fora do formato UUID |
 
 ```bash
@@ -57,6 +57,7 @@ internas.
 | `validation-error` | 400 | campos inválidos (`errors[]` lista campo e mensagem) |
 | `malformed-request` | 400 | JSON inválido ou parâmetro com tipo errado |
 | `not-found` | 404 | solicitação inexistente |
+| `duplicate-request` | 409 | mesmo `externalId` com conteúdo diferente (`existingId` aponta o registro já existente) |
 | `internal-error` | 500 | erro inesperado; o detalhe completo fica no log, localizável pelo `traceId` |
 
 **Correlação**: o cliente pode enviar `X-Correlation-Id`; se não enviar (ou enviar um valor inseguro),
@@ -80,6 +81,39 @@ linhas de log da requisição (`[correlationId]`).
   camada `api`. Erros 5xx são logados com stack trace e `traceId`; 4xx não geram log de erro.
 - **Locale fixo (`pt_BR`)**: mensagens de validação não variam com o `Accept-Language` do cliente.
 
+
+### Duplicidade (`externalId`)
+
+**Por que verificar e depois inserir não basta.** Entre o `SELECT` que não encontra o `externalId` e o
+`INSERT`, outra requisição pode fazer exatamente o mesmo. Em `READ COMMITTED` (padrão do PostgreSQL)
+nenhuma das duas enxerga a outra até o commit, e as duas inserem. Isso não é teórico: no teste
+`concurrentIdenticalRequestsCreateExactlyOneRecord`, com 20 threads largando juntas, cerca de metade
+passa pela checagem prévia sem ver nada. Lock em aplicação (`synchronized`, `ReentrantLock`) também
+não resolve, porque não vale entre instâncias.
+
+**Estratégia adotada:** a **constraint única no banco** é a única barreira que funciona para
+requisições simultâneas e para múltiplas instâncias. A checagem prévia continua existindo apenas como
+atalho barato para o caso comum (retry chegando segundos depois), não como proteção.
+
+1. `SELECT` por `externalId`. Se existe, decide a resposta (abaixo) sem tentar inserir.
+2. `INSERT` na transação curta do repositório.
+3. Se o banco rejeitar pela constraint `uk_activation_request_external_id` (e só por ela; qualquer
+   outra violação é propagada), a requisição **perdeu a corrida**: relê o registro vencedor em uma
+   transação nova e decide a resposta como no passo 1.
+
+O `create` não é envolvido em uma transação única de propósito: após uma violação de constraint o
+PostgreSQL aborta a transação inteira, e a releitura precisa acontecer em outra.
+
+**Semântica da resposta para repetições** (sistemas de origem fazem retry):
+
+| Cenário | Resposta | Justificativa |
+|---|---|---|
+| Mesmo `externalId`, mesmo conteúdo (retry legítimo) | `200 OK` com o registro existente, sem `Location` | O retry é idempotente: o cliente recebe o mesmo resultado que receberia se a primeira resposta não tivesse se perdido, e não precisa tratar um "erro" que não é erro. `201` fica reservado para a criação de fato. |
+| Mesmo `externalId`, conteúdo diferente (`productCode` ou `customerId` divergente) | `409 Conflict`, `type=duplicate-request`, com `existingId` | O serviço não tem como saber qual versão é a correta e não pode sobrescrever uma solicitação que pode já estar em processamento. O cliente consulta o registro existente ou envia um novo `externalId`. |
+| Duas requisições idênticas em paralelo | Uma recebe `201`; a outra recebe `200` com o **mesmo** registro | A constraint garante um único registro; a perdedora detecta a violação, relê e responde como retry. |
+
+O resultado do caso de uso é uma `sealed interface` (`CreationResult.Created` / `AlreadyExists`), e o
+controller escolhe o status em um `switch` exaustivo: um novo caso obriga a decidir a resposta HTTP.
 
 ### Domínio e persistência
 

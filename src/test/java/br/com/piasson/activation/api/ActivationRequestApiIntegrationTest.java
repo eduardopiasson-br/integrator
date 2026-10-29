@@ -42,6 +42,27 @@ class ActivationRequestApiIntegrationTest {
     }
 
     @Test
+    void retryWithSameContentReturns200AndDivergentContentReturns409() throws Exception {
+        String body = """
+                {"externalId": "EXT-E2E-DUP", "customerId": "CUST-1", "productCode": "INTERNET-500"}
+                """;
+        String id = com.jayway.jsonpath.JsonPath.read(
+                mockMvc.perform(post("/api/v1/requests").contentType(MediaType.APPLICATION_JSON).content(body))
+                        .andExpect(status().isCreated())
+                        .andReturn().getResponse().getContentAsString(), "$.id");
+
+        mockMvc.perform(post("/api/v1/requests").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(id));
+
+        mockMvc.perform(post("/api/v1/requests").contentType(MediaType.APPLICATION_JSON).content("""
+                        {"externalId": "EXT-E2E-DUP", "customerId": "CUST-1", "productCode": "TV-100"}
+                        """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.existingId").value(id));
+    }
+
+    @Test
     void unknownIdReturns404() throws Exception {
         mockMvc.perform(get("/api/v1/requests/{id}", UUID.randomUUID()))
                 .andExpect(status().isNotFound());

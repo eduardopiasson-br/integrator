@@ -1,6 +1,7 @@
 package br.com.piasson.activation.api.error;
 
 import br.com.piasson.activation.application.ActivationRequestNotFoundException;
+import br.com.piasson.activation.application.DuplicateActivationRequestException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -74,6 +75,14 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(ActivationRequestNotFoundException.class)
     ProblemDetail handleNotFound(ActivationRequestNotFoundException ex, WebRequest request) {
         return problem(ProblemType.NOT_FOUND, HttpStatus.NOT_FOUND, ex.getMessage(), request);
+    }
+
+    @ExceptionHandler(DuplicateActivationRequestException.class)
+    ProblemDetail handleDuplicate(DuplicateActivationRequestException ex, WebRequest request) {
+        ProblemDetail problem = problem(ProblemType.DUPLICATE_REQUEST, HttpStatus.CONFLICT, ex.getMessage(), request);
+        problem.setProperty("externalId", ex.externalId());
+        problem.setProperty("existingId", ex.existingId());
+        return problem;
     }
 
     @ExceptionHandler(Exception.class)

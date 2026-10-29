@@ -3,6 +3,8 @@ package br.com.piasson.activation.api;
 import br.com.piasson.activation.application.ActivationRequestNotFoundException;
 import br.com.piasson.activation.application.ActivationRequestService;
 import br.com.piasson.activation.application.CreateActivationRequestCommand;
+import br.com.piasson.activation.application.CreationResult;
+import br.com.piasson.activation.application.DuplicateActivationRequestException;
 import br.com.piasson.activation.domain.ActivationRequest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -16,6 +18,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.util.UUID;
 
 import static org.hamcrest.Matchers.endsWith;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
@@ -44,7 +47,7 @@ class ActivationRequestControllerTest {
     void createReturns201WithLocationAndBody() throws Exception {
         ActivationRequest created = ActivationRequest.create("EXT-12345", "CUST-10001", "INTERNET-500");
         given(service.create(new CreateActivationRequestCommand("EXT-12345", "CUST-10001", "INTERNET-500")))
-                .willReturn(created);
+                .willReturn(new CreationResult.Created(created));
 
         mockMvc.perform(post("/api/v1/requests")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -58,6 +61,36 @@ class ActivationRequestControllerTest {
                 .andExpect(jsonPath("$.status").value("PENDING"))
                 .andExpect(jsonPath("$.createdAt").isString())
                 .andExpect(jsonPath("$.updatedAt").isString());
+    }
+
+    @Test
+    void identicalRetryReturns200WithExistingRecordAndNoLocation() throws Exception {
+        ActivationRequest existing = ActivationRequest.create("EXT-12345", "CUST-10001", "INTERNET-500");
+        given(service.create(any())).willReturn(new CreationResult.AlreadyExists(existing));
+
+        mockMvc.perform(post("/api/v1/requests")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY))
+                .andExpect(status().isOk())
+                .andExpect(header().doesNotExist("Location"))
+                .andExpect(jsonPath("$.id").value(existing.getId().toString()));
+    }
+
+    @Test
+    void conflictingContentReturns409ProblemWithExistingId() throws Exception {
+        UUID existingId = UUID.randomUUID();
+        given(service.create(any())).willThrow(new DuplicateActivationRequestException("EXT-12345", existingId));
+
+        mockMvc.perform(post("/api/v1/requests")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY))
+                .andExpect(status().isConflict())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.type").value("urn:activation-service:problem:duplicate-request"))
+                .andExpect(jsonPath("$.title").value("Solicitação duplicada"))
+                .andExpect(jsonPath("$.externalId").value("EXT-12345"))
+                .andExpect(jsonPath("$.existingId").value(existingId.toString()))
+                .andExpect(jsonPath("$.traceId").isString());
     }
 
     @ParameterizedTest

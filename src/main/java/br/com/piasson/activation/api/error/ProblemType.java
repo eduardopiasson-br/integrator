@@ -7,6 +7,7 @@ public enum ProblemType {
     VALIDATION_ERROR("validation-error", "Dados inválidos"),
     MALFORMED_REQUEST("malformed-request", "Requisição malformada"),
     NOT_FOUND("not-found", "Recurso não encontrado"),
+    DUPLICATE_REQUEST("duplicate-request", "Solicitação duplicada"),
     INTERNAL_ERROR("internal-error", "Erro inesperado");
 
     private static final String BASE = "urn:activation-service:problem:";
